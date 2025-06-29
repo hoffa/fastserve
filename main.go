@@ -30,7 +30,9 @@ func newServer(dir string) *server {
 }
 
 func (s *server) loadFiles() error {
-	tempCache := make(map[string]*fileCache)
+	// Track which files we've seen in this scan
+	seen := make(map[string]bool)
+
 	err := filepath.Walk(s.dir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
@@ -45,15 +47,30 @@ func (s *server) loadFiles() error {
 			return err
 		}
 
+		// Mark this file as seen
+		seen[relPath] = true
+
+		s.mu.RLock()
+		cached, exists := s.cache[relPath]
+		s.mu.RUnlock()
+
+		// If file exists and is unchanged, we're done
+		if exists && info.ModTime().Equal(cached.modTime) {
+			return nil
+		}
+
+		// File is new or modified, read it
 		content, err := os.ReadFile(path)
 		if err != nil {
 			return err
 		}
 
-		tempCache[relPath] = &fileCache{
+		s.mu.Lock()
+		s.cache[relPath] = &fileCache{
 			content: content,
 			modTime: info.ModTime(),
 		}
+		s.mu.Unlock()
 
 		return nil
 	})
@@ -62,8 +79,13 @@ func (s *server) loadFiles() error {
 		return err
 	}
 
+	// Remove files that no longer exist
 	s.mu.Lock()
-	s.cache = tempCache
+	for path := range s.cache {
+		if !seen[path] {
+			delete(s.cache, path)
+		}
+	}
 	s.mu.Unlock()
 
 	return nil
