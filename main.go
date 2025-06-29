@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"crypto/tls"
 	"flag"
 	"log"
 	"net/http"
@@ -9,6 +10,8 @@ import (
 	"path/filepath"
 	"sync"
 	"time"
+
+	"golang.org/x/crypto/acme/autocert"
 )
 
 type fileCache struct {
@@ -91,6 +94,15 @@ func (s *server) loadFiles() error {
 	return nil
 }
 
+// logRequest logs HTTP requests with method, path, and status code
+func logRequest(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		start := time.Now()
+		next.ServeHTTP(w, r)
+		log.Printf("%s %s %v", r.Method, r.URL.Path, time.Since(start))
+	}
+}
+
 func (s *server) handleRequest(w http.ResponseWriter, r *http.Request) {
 	path := r.URL.Path[1:] // Remove leading slash
 
@@ -110,6 +122,7 @@ func main() {
 	dir := flag.String("dir", ".", "Directory to serve (required)")
 	addr := flag.String("addr", ":8080", "Address to listen on")
 	refresh := flag.Duration("refresh", time.Minute, "Refresh interval")
+	domain := flag.String("https", "", "Enable HTTPS with this domain (e.g., example.com)")
 	flag.Parse()
 
 	srv := newServer(*dir)
@@ -129,8 +142,42 @@ func main() {
 		}
 	}()
 
-	http.HandleFunc("/", srv.handleRequest)
+	// Wrap handler with logging middleware
+	http.HandleFunc("/", logRequest(srv.handleRequest))
 
-	log.Printf("Serving %s on %s (refreshing every %v)", *dir, *addr, *refresh)
-	log.Fatal(http.ListenAndServe(*addr, nil))
+	log.Printf("Serving %s (refreshing every %v)", *dir, *refresh)
+
+	if *domain != "" {
+		// HTTPS mode with Let's Encrypt
+		log.Printf("Starting HTTPS server for https://%s", *domain)
+
+		certManager := autocert.Manager{
+			Prompt:     autocert.AcceptTOS,
+			HostPolicy: autocert.HostWhitelist(*domain),
+			Cache:      autocert.DirCache("certs"),
+			Email:      "admin@" + *domain, // Optional but recommended
+		}
+
+		// HTTP server for redirect and challenges
+		go func() {
+			log.Printf("Starting HTTP->HTTPS redirect on :80")
+			log.Fatal(http.ListenAndServe(":http", certManager.HTTPHandler(nil)))
+		}()
+
+		// HTTPS server
+		server := &http.Server{
+			Addr: ":https",
+			TLSConfig: &tls.Config{
+				GetCertificate: certManager.GetCertificate,
+				MinVersion:     tls.VersionTLS12, // Enforce modern TLS
+			},
+		}
+
+		log.Fatal(server.ListenAndServeTLS("",
+			"")) // Cert and key come from Let's Encrypt
+	} else {
+		// HTTP only mode
+		log.Printf("Starting HTTP server on %s", *addr)
+		log.Fatal(http.ListenAndServe(*addr, nil))
+	}
 }

@@ -1,3 +1,9 @@
 module github.com/yourusername/fastserve
 
 go 1.24.4
+
+require (
+	golang.org/x/crypto v0.39.0 // indirect
+	golang.org/x/net v0.21.0 // indirect
+	golang.org/x/text v0.26.0 // indirect
+)
