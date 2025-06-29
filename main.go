@@ -20,15 +20,19 @@ type fileCache struct {
 }
 
 type server struct {
-	mu    sync.RWMutex
-	dir   string
-	cache map[string]*fileCache
+	mu               sync.RWMutex
+	dir              string
+	cache            map[string]*fileCache
+	visitors         map[string]time.Time // IP -> last visit time
+	minRequestInterval time.Duration      // Minimum time between requests from same IP
 }
 
-func newServer(dir string) *server {
+func newServer(dir string, minInterval time.Duration) *server {
 	return &server{
-		dir:   dir,
-		cache: make(map[string]*fileCache),
+		dir:              dir,
+		cache:            make(map[string]*fileCache),
+		visitors:         make(map[string]time.Time),
+		minRequestInterval: minInterval,
 	}
 }
 
@@ -103,7 +107,37 @@ func logRequest(next http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
+// rateLimit allows 10 requests per minute per IP
+func (s *server) rateLimit(ip string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	// Clean up old entries (older than 1 minute)
+	now := time.Now()
+	for ip, lastVisit := range s.visitors {
+		if now.Sub(lastVisit) > time.Minute {
+			delete(s.visitors, ip)
+		}
+	}
+
+	// Check rate limit
+	lastVisit, exists := s.visitors[ip]
+	if exists && now.Sub(lastVisit) < s.minRequestInterval {
+		return false
+	}
+
+	s.visitors[ip] = now
+	return true
+}
+
 func (s *server) handleRequest(w http.ResponseWriter, r *http.Request) {
+	// Simple rate limiting
+	ip := r.RemoteAddr
+	if !s.rateLimit(ip) {
+		http.Error(w, "Too many requests, please try again later", http.StatusTooManyRequests)
+		return
+	}
+
 	path := r.URL.Path[1:] // Remove leading slash
 
 	s.mu.RLock()
@@ -122,10 +156,16 @@ func main() {
 	dir := flag.String("dir", ".", "Directory to serve (required)")
 	addr := flag.String("addr", ":8080", "Address to listen on")
 	refresh := flag.Duration("refresh", time.Minute, "Refresh interval")
+	rate := flag.Duration("rate", time.Second, "Minimum time between requests from same IP (e.g., 100ms, 1s, 5s)")
 	domain := flag.String("https", "", "Enable HTTPS with this domain (e.g., example.com)")
 	flag.Parse()
 
-	srv := newServer(*dir)
+	if *rate <= 0 {
+		log.Fatal("Minimum request interval must be positive")
+	}
+
+	srv := newServer(*dir, *rate)
+	log.Printf("Rate limiting: 1 request per %v per IP", *rate)
 
 	// Initial load
 	if err := srv.loadFiles(); err != nil {
