@@ -100,7 +100,7 @@ func logRequest(next http.HandlerFunc) http.HandlerFunc {
 }
 
 func (s *server) handleRequest(w http.ResponseWriter, r *http.Request) {
-	path := r.URL.Path[1:] // Remove leading slash
+	path := r.URL.Path[1:]
 
 	s.mu.RLock()
 	cached, exists := s.cache[path]
@@ -119,6 +119,7 @@ func main() {
 	dir := flag.String("dir", ".", "directory to serve")
 	refresh := flag.Duration("refresh", time.Minute, "file refresh interval")
 	ignorePattern := flag.String("ignore", "^\\.", "file ignore pattern")
+	timeout := flag.Duration("timeout", 30*time.Second, "HTTP timeout")
 	flag.Parse()
 
 	ignore, err := regexp.Compile(*ignorePattern)
@@ -143,8 +144,13 @@ func main() {
 		}
 	}()
 
-	http.HandleFunc("/", logRequest(srv.handleRequest))
+	server := &http.Server{
+		Addr:         *addr,
+		Handler:      logRequest(srv.handleRequest),
+		ReadTimeout:  *timeout,
+		WriteTimeout: *timeout,
+	}
 
 	log.Printf("serving %s on %s", *dir, *addr)
-	log.Fatal(http.ListenAndServe(*addr, nil))
+	log.Fatal(server.ListenAndServe())
 }
