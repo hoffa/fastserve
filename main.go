@@ -30,7 +30,7 @@ func newServer(dir string) *server {
 	}
 }
 
-func (s *server) loadFiles(ignore *regexp.Regexp) error {
+func (s *server) loadFiles(ignore regexp.Regexp) error {
 	seen := make(map[string]bool)
 
 	err := filepath.Walk(s.dir, func(path string, info os.FileInfo, err error) error {
@@ -47,7 +47,7 @@ func (s *server) loadFiles(ignore *regexp.Regexp) error {
 			return err
 		}
 
-		if ignore != nil && ignore.MatchString(relPath) {
+		if ignore.MatchString(relPath) {
 			return nil
 		}
 
@@ -122,21 +122,21 @@ func main() {
 	ignorePattern := flag.String("ignore", "^\\.", "file ignore pattern")
 	flag.Parse()
 
-	ignoreRe, err := regexp.Compile(*ignorePattern)
+	ignore, err := regexp.Compile(*ignorePattern)
 	if err != nil {
 		log.Fatal(err)
 	}
 
 	srv := newServer(*dir)
 
-	if err := srv.loadFiles(ignoreRe); err != nil {
+	if err := srv.loadFiles(*ignore); err != nil {
 		log.Fatal(err)
 	}
 
 	go func() {
 		for {
 			time.Sleep(*refresh)
-			if err := srv.loadFiles(ignoreRe); err != nil {
+			if err := srv.loadFiles(*ignore); err != nil {
 				log.Fatal(err)
 			}
 		}
