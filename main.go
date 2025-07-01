@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strings"
 	"sync"
 	"time"
 )
@@ -100,7 +101,11 @@ func logRequest(next http.HandlerFunc) http.HandlerFunc {
 }
 
 func (s *server) handleRequest(w http.ResponseWriter, r *http.Request) {
-	path := r.URL.Path[1:]
+	p := r.URL.Path
+	if strings.HasSuffix(p, "/") {
+		p += "index.html"
+	}
+	path := strings.TrimPrefix(p, "/")
 
 	s.mu.RLock()
 	cached, exists := s.cache[path]
