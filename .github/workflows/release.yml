@@ -1,0 +1,22 @@
+on:
+  push:
+    branches:
+      - main
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v4
+      - run: |
+          GOOS=linux GOARCH=arm GOARM=6 go build -o dist/memserve_linux_arm6
+          GOOS=linux GOARCH=arm GOARM=7 go build -o dist/memserve_linux_arm7
+          GOOS=linux GOARCH=amd64 go build -o dist/memserve_linux_amd64
+          GOOS=darwin GOARCH=amd64 go build -o dist/memserve_darwin_amd64
+          GOOS=darwin GOARCH=arm64 go build -o dist/memserve_darwin_arm64
+      - run: |
+          git tag --force v1
+          git push --force origin v1
+      - run: gh release upload v1 dist/* --clobber
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
