@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sync"
 	"time"
 )
@@ -29,7 +30,7 @@ func newServer(dir string) *server {
 	}
 }
 
-func (s *server) loadFiles() error {
+func (s *server) loadFiles(ignore *regexp.Regexp) error {
 	seen := make(map[string]bool)
 
 	err := filepath.Walk(s.dir, func(path string, info os.FileInfo, err error) error {
@@ -44,6 +45,10 @@ func (s *server) loadFiles() error {
 		relPath, err := filepath.Rel(s.dir, path)
 		if err != nil {
 			return err
+		}
+
+		if ignore != nil && ignore.MatchString(relPath) {
+			return nil
 		}
 
 		seen[relPath] = true
@@ -111,21 +116,27 @@ func (s *server) handleRequest(w http.ResponseWriter, r *http.Request) {
 }
 
 func main() {
-	dir := flag.String("dir", ".", "Directory to serve")
-	addr := flag.String("addr", ":8080", "Address to listen on")
-	refresh := flag.Duration("refresh", time.Minute, "File refresh interval")
+	addr := flag.String("addr", ":8080", "address to listen on")
+	dir := flag.String("dir", ".", "directory to serve")
+	refresh := flag.Duration("refresh", time.Minute, "file refresh interval")
+	ignorePattern := flag.String("ignore", "^\\.", "file ignore pattern")
 	flag.Parse()
+
+	ignoreRe, err := regexp.Compile(*ignorePattern)
+	if err != nil {
+		log.Fatal(err)
+	}
 
 	srv := newServer(*dir)
 
-	if err := srv.loadFiles(); err != nil {
+	if err := srv.loadFiles(ignoreRe); err != nil {
 		log.Fatal(err)
 	}
 
 	go func() {
 		for {
 			time.Sleep(*refresh)
-			if err := srv.loadFiles(); err != nil {
+			if err := srv.loadFiles(ignoreRe); err != nil {
 				log.Fatal(err)
 			}
 		}
@@ -133,6 +144,6 @@ func main() {
 
 	http.HandleFunc("/", logRequest(srv.handleRequest))
 
-	log.Printf("serving %s on %s (refreshing every %v)", *dir, *addr, *refresh)
+	log.Printf("serving %s on %s", *dir, *addr)
 	log.Fatal(http.ListenAndServe(*addr, nil))
 }
