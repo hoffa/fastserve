@@ -33,7 +33,7 @@ func newServer(dir string) *server {
 func (s *server) loadFiles(ignore regexp.Regexp) error {
 	seen := make(map[string]bool)
 
-	err := filepath.Walk(s.dir, func(path string, info os.FileInfo, err error) error {
+	if err := filepath.Walk(s.dir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
 		}
@@ -75,15 +75,14 @@ func (s *server) loadFiles(ignore regexp.Regexp) error {
 		s.mu.Unlock()
 
 		return nil
-	})
-
-	if err != nil {
+	}); err != nil {
 		return err
 	}
 
 	s.mu.Lock()
 	for path := range s.cache {
 		if !seen[path] {
+			log.Println("uncaching", path)
 			delete(s.cache, path)
 		}
 	}
@@ -136,9 +135,11 @@ func main() {
 	go func() {
 		for {
 			time.Sleep(*refresh)
+			start := time.Now()
 			if err := srv.loadFiles(*ignore); err != nil {
 				log.Fatal(err)
 			}
+			log.Println("refreshed in", time.Since(start))
 		}
 	}()
 
