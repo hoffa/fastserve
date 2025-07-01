@@ -61,7 +61,7 @@ func (s *server) loadFiles(ignore regexp.Regexp) error {
 			return nil
 		}
 
-		log.Println("caching", path)
+		log.Println("caching", relPath)
 		content, err := os.ReadFile(path)
 		if err != nil {
 			return err
